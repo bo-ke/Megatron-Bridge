@@ -580,6 +580,8 @@ def training_log(
             log_string += f" params norm: {params_norm:.3f} |"
         log_string += " number of skipped iterations: {:3d} |".format(total_loss_dict[skipped_iters_key])
         log_string += " number of nan iterations: {:3d} |".format(total_loss_dict[nan_iters_key])
+        tokens_per_sec_per_gpu = batch_size * config.model.seq_length / (elapsed_time_per_iteration * get_world_size_safe())
+        log_string += f" tokens/sec per GPU: {tokens_per_sec_per_gpu:.1f} |"
         total_loss_dict[advanced_iters_key] = 0
         total_loss_dict[skipped_iters_key] = 0
         total_loss_dict[nan_iters_key] = 0

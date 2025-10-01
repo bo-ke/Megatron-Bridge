@@ -540,6 +540,7 @@ def train_step(
     # Update parameters.
     timers("optimizer", log_level=1).start(barrier=optim_config.barrier_with_L1_time)
     update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
+    # update_successful, grad_norm, num_zeros_in_grad = True, 1.0, 0
     timers("optimizer").stop()
 
     # when freezing sub-models we may have a mixture of successful and unsucessful ranks,

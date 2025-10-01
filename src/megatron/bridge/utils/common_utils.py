@@ -19,7 +19,9 @@ import torch
 import torch.distributed
 from megatron.core import DistributedDataParallel as DDP
 from megatron.core.transformer.module import Float16Module
+import logging
 
+logger = logging.getLogger(__file__)
 
 try:
     from megatron.core.distributed import TorchFullyShardedDataParallel as torch_FSDP
@@ -81,7 +83,8 @@ def print_rank_0(message: str) -> None:
     """
     rank = get_rank_safe()
     if rank == 0:
-        print(message, flush=True)
+        # print(message, flush=True)
+        logger.info(message)
 
 
 def warn_rank_0(message):
@@ -108,6 +111,8 @@ def print_rank_last(message: str) -> None:
     """
     if torch.distributed.is_initialized():
         if is_last_rank():
-            print(message, flush=True)
+            # print(message, flush=True)
+            logger.info(message)
     else:
-        print(message, flush=True)
+        # print(message, flush=True)
+        logger.info(message)
