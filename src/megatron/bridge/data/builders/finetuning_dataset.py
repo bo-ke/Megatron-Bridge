@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import logging
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -105,9 +104,10 @@ class FinetuningDatasetBuilder:
                     max_seq_length=self.seq_length,
                     seed=self.seed,
                     output_metadata_path=self.pack_metadata,
+                    dataset_kwargs=self.dataset_kwargs,
                 )
 
-            if not self.validation_path_packed.is_file():
+            if self.do_validation and not self.validation_path_packed.is_file():
                 print_rank_0(f"Preparing packed validation data at {self.validation_path_packed}")
                 prepare_packed_sequence_data(
                     input_path=self.validation_path,
@@ -117,6 +117,7 @@ class FinetuningDatasetBuilder:
                     max_seq_length=self.seq_length,
                     seed=self.seed,
                     output_metadata_path=self.pack_metadata,
+                    dataset_kwargs=self.dataset_kwargs,
                 )
 
     def build(self) -> list[Optional[Any]]:
@@ -176,7 +177,6 @@ class FinetuningDatasetBuilder:
 
         return [train_ds, valid_ds, test_ds]
 
-    @lru_cache
     def _create_dataset(
         self,
         path: Union[str, Path],

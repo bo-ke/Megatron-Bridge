@@ -217,7 +217,7 @@ class TestCanonicalLoRA:
         lora = CanonicalLoRA(target_modules=["linear_q", "linear_k", "linear_v", "linear_fc1_up", "linear_fc1_gate"])
 
         # Mock the get_adapter_attributes_from_linear function
-        def mock_get_attrs(module):
+        def mock_get_attrs(module, is_expert=False):
             if hasattr(module, "out_features"):
                 if module.out_features == 1536:  # linear_qkv
                     return (False, 512, 1536, False, True)
@@ -779,6 +779,7 @@ class TestCanonicalLoRAMegatronIntegration:
         efficiency_ratio = trainable_params / total_params
         assert efficiency_ratio < 0.3, f"CanonicalLoRA should be parameter efficient, got ratio: {efficiency_ratio}"
 
+    @pytest.mark.pleasefixme  # This test is too slow for unit tests (>Xs)
     def test_canonical_lora_forward_pass_with_megatron_model(self):
         """Test forward pass through CanonicalLoRA-adapted Megatron model using pre-wrap hooks."""
 

@@ -3,6 +3,13 @@
 Megatron Bridge provides production-ready training recipes for several popular models. You can find an overview of supported recipes and 🤗 HuggingFace bridges [here](index.md#supported-models).
 This guide will cover the next steps to make use of a training recipe, including how to [override configuration](#overriding-configuration) and how to [launch a job](#launch-methods).
 
+## Overview
+
+- **Coverage**: We provide recipes across select model families and sizes, including Llama, Qwen, DeepSeek, and Nemotron-H (Mamba-based).
+- **Defaults**: Each recipe sets defaults meant for convergence and performance across parallelisms, precision data types, and optimizer & scheduler choices. These recipes can be used as a high-quality starting point. 
+- **Integration**: Recipes return a single `ConfigContainer` that plugs directly into our training [entry points](training/entry-points.md) (see the published docs as well: https://docs.nvidia.com/nemo/megatron-bridge/latest/training/entry-points.html).
+- **Customization**: You can override any part of the recipe (Python, YAML, CLI) to adapt to your data, scale, and objectives.
+
 ## Overriding configuration
 
 Recipes are provided through a {py:class}`~bridge.training.config.ConfigContainer` object. This is a dataclass that holds all configuration objects needed for training. You can find a more detailed overview of the `ConfigContainer` [here](training/config-container-overview.md).
@@ -197,6 +204,42 @@ if __name__ == "__main__":
     plugins.append(nsys)
     run.run(train_script, plugins=plugins, executor=executor)
 ```
+
+##### Custom Argument Converters
+
+By default, plugins convert their configuration to Hydra-style CLI arguments when used with `run.Script` tasks. If your training script uses a different argument format (e.g., argparse), you can provide a custom converter function via the `script_args_converter_fn` parameter.
+
+```python
+import nemo_run as run
+from typing import List
+from megatron.bridge.recipes.run_plugins import (
+    PreemptionPlugin,
+    PreemptionPluginScriptArgs,
+)
+
+# Define a custom converter for argparse-style arguments
+def argparse_preemption_converter(args: PreemptionPluginScriptArgs) -> List[str]:
+    result = []
+    if args.enable_exit_handler:
+        result.append("--enable-exit-handler")
+    if args.enable_exit_handler_for_data_loader:
+        result.append("--enable-exit-handler-dataloader")
+    return result
+
+if __name__ == "__main__":
+    train_script = run.Script(path="/path/to/train/script.py", entrypoint="python")
+    executor = run.LocalExecutor(ntasks_per_node=8, launcher="torchrun")
+
+    # Use the plugin with the custom converter
+    plugin = PreemptionPlugin(
+        preempt_time=120,
+        enable_exit_handler=True,
+        script_args_converter_fn=argparse_preemption_converter,
+    )
+    run.run(train_script, plugins=[plugin], executor=executor)
+```
+
+Each plugin provides its own corresponding dataclass (e.g., `PreemptionPluginScriptArgs`, `NsysPluginScriptArgs`) that defines the available arguments for conversion.
 
 See the [API reference](#bridge.recipes.run_plugins) for a list of available NeMo-Run plugins.
 

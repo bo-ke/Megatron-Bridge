@@ -40,6 +40,7 @@ from qwen_vl_utils import process_vision_info
 from transformers import AutoProcessor, AutoTokenizer
 
 from megatron.bridge import AutoBridge
+from megatron.bridge.models.hf_pretrained.utils import is_safe_repo
 from megatron.bridge.utils.common_utils import get_last_rank, print_rank_0
 
 
@@ -165,8 +166,7 @@ def process_image_inputs(processor, image_path: Optional[str], prompt: str):
             padding=True,
             return_tensors="pt",
         )
-
-        return inputs.input_ids, inputs.pixel_values, inputs.image_grid_thw, messages
+        return inputs.input_ids, inputs.pixel_values, getattr(inputs, "image_grid_thw", None), messages
     else:
         # Text-only processing
         inputs = processor(text=[prompt], return_tensors="pt")
@@ -206,8 +206,8 @@ def main(args) -> None:
         model_provider.expert_model_parallel_size = ep
         model_provider.expert_tensor_parallel_size = etp
         model_provider.pipeline_dtype = torch.bfloat16
+        model_provider.finalize()
         model_provider.initialize_model_parallel(seed=0)
-
         # Load the Megatron model directly
         model = bridge.load_megatron_model(
             args.megatron_model_path,
@@ -216,6 +216,7 @@ def main(args) -> None:
                 "pipeline_model_parallel_size": pp,
                 "expert_model_parallel_size": ep,
                 "expert_tensor_parallel_size": etp,
+                "pipeline_dtype": torch.bfloat16,
             },
             wrap_with_ddp=False,
         )
@@ -230,6 +231,7 @@ def main(args) -> None:
         model_provider.expert_model_parallel_size = ep
         model_provider.expert_tensor_parallel_size = etp
         model_provider.pipeline_dtype = torch.bfloat16
+        model_provider.finalize()
         model_provider.initialize_model_parallel(seed=0)
         model = model_provider.provide_distributed_model(wrap_with_ddp=False)
 
@@ -237,9 +239,26 @@ def main(args) -> None:
     for m in model:
         m.eval()
 
+    # Set grad_scale_func to None on the model's config for inference
+    for m in model:
+        if hasattr(m, "config"):
+            m.config.grad_scale_func = None
+
     # Initialize tokenizer and processor
-    tokenizer = AutoTokenizer.from_pretrained(args.hf_model_path, trust_remote_code=True)
-    processor = AutoProcessor.from_pretrained(args.hf_model_path, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.hf_model_path,
+        trust_remote_code=is_safe_repo(
+            trust_remote_code=args.trust_remote_code,
+            hf_path=args.hf_model_path,
+        ),
+    )
+    processor = AutoProcessor.from_pretrained(
+        args.hf_model_path,
+        trust_remote_code=is_safe_repo(
+            trust_remote_code=args.trust_remote_code,
+            hf_path=args.hf_model_path,
+        ),
+    )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -338,7 +357,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--hf_model_path",
         type=str,
-        default="Qwen/Qwen2.5-VL-3B-Instruct",
+        required=True,
         help="Path to the HuggingFace VL model.",
     )
     parser.add_argument(
@@ -364,6 +383,7 @@ if __name__ == "__main__":
         default=None,
         help="Path or URL to the image for vision-language generation (optional).",
     )
+    parser.add_argument("--trust_remote_code", action="store_true", help="if trust_remote_code")
     args = parser.parse_args()
 
     main(args)
