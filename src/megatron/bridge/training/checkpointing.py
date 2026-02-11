@@ -1296,7 +1296,9 @@ def cleanup_old_non_persistent_checkpoint(
         leave_ckpt_num: The number of latest checkpoints to keep.
         do_async: If True, performs cleanup in a background thread.
     """
-    if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
+    # NOTE: 使用 local_rank 而不是 global rank，确保每台机器都清理本地文件系统上的 checkpoint
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    if torch.distributed.is_initialized() and local_rank != 0:
         return
     save_dir = Path(save_dir)
 
@@ -1358,12 +1360,10 @@ def maybe_save_dataloader_state(
     # Construct the specific filename within that iteration directory
     data_state_save_path = os.path.join(iter_dir, f"train_dataloader_dprank{dp_rank:03d}.pt")
 
-    torch.distributed.barrier(group=pg_collection.dp)
+    # Each rank ensures directory exists (needed for multi-node with local filesystems)
+    ensure_directory_exists(data_state_save_path)
 
-    if pg_collection.dp.rank() == 0:
-        ensure_directory_exists(data_state_save_path)
-
-    torch.distributed.barrier(group=pg_collection.dp)
+    torch.distributed.barrier(group=mpu.get_data_parallel_group(with_context_parallel=True))
 
     dataloader_save_dict = {}
     dataloader_save_dict["dataloader_state_dict"] = train_dataloader_state_dict
