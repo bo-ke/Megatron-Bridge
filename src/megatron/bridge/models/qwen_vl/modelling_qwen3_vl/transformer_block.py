@@ -556,7 +556,12 @@ class Qwen3VLTransformerBlock(TransformerBlock):
         deepstack_visual_embeds_tuple = tuple(deepstack_visual_embeds) if deepstack_visual_embeds else ()
 
         def checkpoint_handler(forward_func):
-            """Determines whether to use the `te_checkpoint` or `tensor_parallel.checkpoint`"""
+            """Determines whether to use the `te_checkpoint` or `tensor_parallel.checkpoint`
+
+            Note: DeepStack layers should be skipped from recomputation (via recompute_skip_num_layers),
+            so checkpointed layers don't need visual_pos_masks/deepstack_visual_embeds. Pass None to
+            avoid "save_for_backward can only save variables, but argument is of type list" error.
+            """
             if self.config.fp8:
                 return te_checkpoint(
                     forward_func,
@@ -568,8 +573,8 @@ class Qwen3VLTransformerBlock(TransformerBlock):
                     context,
                     context_mask,
                     rotary_pos_emb,
-                    visual_pos_masks,
-                    *deepstack_visual_embeds_tuple,
+                    None,  # visual_pos_masks - not needed for non-DeepStack layers
+                    None,  # deepstack_visual_embeds - not needed for non-DeepStack layers
                 )
             else:
                 return tensor_parallel.checkpoint(
@@ -580,8 +585,8 @@ class Qwen3VLTransformerBlock(TransformerBlock):
                     context,
                     context_mask,
                     rotary_pos_emb,
-                    visual_pos_masks,
-                    *deepstack_visual_embeds_tuple,
+                    None,  # visual_pos_masks - not needed for non-DeepStack layers
+                    None,  # deepstack_visual_embeds - not needed for non-DeepStack layers
                 )
 
         if self.config.recompute_method == "uniform":
