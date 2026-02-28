@@ -509,7 +509,15 @@ class Qwen3VLTransformerBlock(TransformerBlock):
         visual_pos_masks: Optional[torch.Tensor] = None,
         deepstack_visual_embeds: Optional[list[torch.Tensor]] = None,
     ):
-        """Forward method with activation checkpointing."""
+        """Forward method with activation checkpointing.
+
+        Note: torch's save_for_backward only accepts individual Tensors, not lists.
+        deepstack_visual_embeds is a list[Tensor], so we flatten it into individual
+        tensor args before passing to checkpoint, and reconstruct inside custom_forward.
+        """
+        # Flatten deepstack_visual_embeds for checkpoint compatibility.
+        # save_for_backward cannot handle list[Tensor], so we pass them as *args.
+        num_deepstack_embeds = len(deepstack_visual_embeds) if deepstack_visual_embeds is not None else 0
 
         def custom(start: int, end: int):
             def custom_forward(
@@ -519,9 +527,11 @@ class Qwen3VLTransformerBlock(TransformerBlock):
                 context_mask,
                 rotary_pos_emb,
                 visual_pos_masks,
-                *deepstack_visual_embeds_args,
+                *flat_deepstack_embeds,
             ):
-                deepstack_visual_embeds = list(deepstack_visual_embeds_args) if deepstack_visual_embeds_args else None
+                # Reconstruct deepstack_visual_embeds from flattened args
+                ds_embeds = list(flat_deepstack_embeds) if flat_deepstack_embeds else None
+
                 for index in range(start, end):
                     layer = self._get_layer(index)
                     inner_fp8_context = (
@@ -541,19 +551,20 @@ class Qwen3VLTransformerBlock(TransformerBlock):
                             packed_seq_params=packed_seq_params,
                         )
 
-                        if self.pre_process and deepstack_visual_embeds is not None:
+                        if self.pre_process and ds_embeds is not None:
                             l_no = layer.layer_number - 1
-                            if l_no in range(len(deepstack_visual_embeds)):
+                            if l_no in range(len(ds_embeds)):
                                 hidden_states = self._deepstack_process(
                                     hidden_states,
                                     visual_pos_masks,
-                                    deepstack_visual_embeds[l_no],
+                                    ds_embeds[l_no],
                                 )
                 return hidden_states, context
 
             return custom_forward
 
-        deepstack_visual_embeds_tuple = tuple(deepstack_visual_embeds) if deepstack_visual_embeds else ()
+        # Build flattened args: standard tensors + individual deepstack embed tensors
+        flat_extra_args = tuple(deepstack_visual_embeds) if deepstack_visual_embeds is not None else ()
 
         def checkpoint_handler(forward_func):
             """Determines whether to use the `te_checkpoint` or `tensor_parallel.checkpoint`
@@ -573,8 +584,8 @@ class Qwen3VLTransformerBlock(TransformerBlock):
                     context,
                     context_mask,
                     rotary_pos_emb,
-                    None,  # visual_pos_masks - not needed for non-DeepStack layers
-                    None,  # deepstack_visual_embeds - not needed for non-DeepStack layers
+                    visual_pos_masks,
+                    *flat_extra_args,
                 )
             else:
                 return tensor_parallel.checkpoint(
@@ -585,8 +596,8 @@ class Qwen3VLTransformerBlock(TransformerBlock):
                     context,
                     context_mask,
                     rotary_pos_emb,
-                    None,  # visual_pos_masks - not needed for non-DeepStack layers
-                    None,  # deepstack_visual_embeds - not needed for non-DeepStack layers
+                    visual_pos_masks,
+                    *flat_extra_args,
                 )
 
         if self.config.recompute_method == "uniform":
@@ -625,7 +636,7 @@ class Qwen3VLTransformerBlock(TransformerBlock):
                         context_mask,
                         rotary_pos_emb,
                         visual_pos_masks,
-                        *deepstack_visual_embeds_tuple,
+                        *flat_extra_args,
                     )
         else:
             raise ValueError("Invalid activation recompute method.")
