@@ -604,6 +604,14 @@ class Qwen3VLTransformerBlock(TransformerBlock):
             # Uniformly divide the total number of Transformer layers and checkpoint
             # the input activation of each divided chunk.
             # A method to further reduce memory usage reducing checkpoints.
+            # Note: uniform method with full granularity is not compatible with DeepStack layers on PP rank 0
+            #pp_rank = parallel_state.get_pipeline_model_parallel_rank()
+            #if self.config.recompute_granularity == "full" and pp_rank == 0:
+            #    raise ValueError(
+            #        "recompute_granularity='full' with recompute_method='uniform' is not supported "
+            #        "for Qwen3VL on PP rank 0 (DeepStack layers). Use recompute_method='block' with "
+            #        "recompute_skip_num_layers>=3, or use recompute_granularity='selective'."
+            #    )
             layer_idx = 0
             while layer_idx < self.num_layers_per_pipeline_rank:
                 hidden_states, context = checkpoint_handler(
