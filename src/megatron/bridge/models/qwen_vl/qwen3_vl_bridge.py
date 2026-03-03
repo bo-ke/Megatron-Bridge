@@ -13,7 +13,8 @@
 # limitations under the License.
 
 import logging
-from typing import Dict, Union
+from typing import Dict, Mapping, Union
+
 import torch
 from transformers import Qwen3VLForConditionalGeneration, Qwen3VLMoeForConditionalGeneration
 
@@ -406,6 +407,7 @@ class Qwen3VLMoEBridge(MegatronModelBridge):
         self,
         task: WeightConversionTask,
         converted_weights_dict: Dict[str, torch.Tensor],
+        hf_state_dict: Mapping[str, torch.Tensor],
     ) -> Dict[str, torch.Tensor]:
         num_experts = self.hf_config.text_config.num_experts
         ep_size = parallel_state.get_expert_model_parallel_world_size()
@@ -436,38 +438,23 @@ class Qwen3VLMoEBridge(MegatronModelBridge):
             if len(self.hf_weights_cache[key]) == num_experts:
                 logging.debug(f"All experts are loaded for {key}")
                 # all experts are loaded
-                # Output individual expert weights instead of merged tensor to avoid GPU OOM
-                # vLLM's qwen3_vl_moe.py can handle both fused format (experts.gate_up_proj)
-                # and unfused format (experts.{i}.gate_proj.weight, experts.{i}.up_proj.weight)
-                # Note: .weight suffix is required for vLLM's pattern matching
-                result_dict = {}
                 if self.hf_weights_cache[key][0].ndim == 3:  # expert 0
-                    # gate_up: output as separate gate_proj and up_proj for each expert
-                    # key format: model.language_model.layers.X.mlp.experts.gate_up_proj
-                    # output format: model.language_model.layers.X.mlp.experts.{i}.gate_proj.weight
-                    # expert_weight shape from megatron_to_hf: [2, hidden, intermediate]
-                    # HF expected shape: [intermediate, hidden] - need transpose!
-                    base_key = key.replace(".gate_up_proj", "")
-                    for i in range(num_experts):
-                        expert_weight = self.hf_weights_cache[key][i]  # shape: [2, hidden, intermediate]
-                        # expert_weight[0] is gate with shape [hidden, intermediate]
-                        # expert_weight[1] is up with shape [hidden, intermediate]
-                        # Need to transpose to HF format [intermediate, hidden]
-                        result_dict[f"{base_key}.{i}.gate_proj.weight"] = expert_weight[0].transpose(0, 1).contiguous()
-                        result_dict[f"{base_key}.{i}.up_proj.weight"] = expert_weight[1].transpose(0, 1).contiguous()
+                    # gate up
+                    merged_hf_gate_weights = torch.cat(
+                        [self.hf_weights_cache[key][i][0].unsqueeze(0) for i in range(num_experts)], dim=0
+                    )
+                    merged_hf_up_weights = torch.cat(
+                        [self.hf_weights_cache[key][i][1].unsqueeze(0) for i in range(num_experts)], dim=0
+                    )
                     del self.hf_weights_cache[key]
-                    return result_dict
+                    return {key: torch.cat([merged_hf_gate_weights, merged_hf_up_weights], dim=-1)}
                 elif self.hf_weights_cache[key][0].ndim == 2:  # expert 0
-                    # down_proj: output as separate down_proj for each expert
-                    # key format: model.language_model.layers.X.mlp.experts.down_proj
-                    # output format: model.language_model.layers.X.mlp.experts.{i}.down_proj.weight
-                    # down_proj shape from megatron_to_hf after ExpertMLPDownProjMapping transpose: [intermediate, hidden]
-                    # HF expected shape: [hidden, intermediate] - need transpose!
-                    base_key = key.replace(".down_proj", "")
-                    for i in range(num_experts):
-                        result_dict[f"{base_key}.{i}.down_proj.weight"] = self.hf_weights_cache[key][i].transpose(0, 1).contiguous()
+                    # down
+                    merged_hf_down_weights = torch.cat(
+                        [self.hf_weights_cache[key][i].unsqueeze(0) for i in range(num_experts)], dim=0
+                    )
                     del self.hf_weights_cache[key]
-                    return result_dict
+                    return {key: merged_hf_down_weights}
                 else:
                     raise ValueError(
                         f"Incorrect shape of self.hf_weights_cache[key]: {key} {self.hf_weights_cache[key].shape}"
