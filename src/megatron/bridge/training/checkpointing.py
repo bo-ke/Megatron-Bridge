@@ -1367,7 +1367,12 @@ def maybe_save_dataloader_state(
 
     dataloader_save_dict = {}
     dataloader_save_dict["dataloader_state_dict"] = train_dataloader_state_dict
-    torch.save(dataloader_save_dict, data_state_save_path)
+    if  MultiStorageClientFeature.is_enabled():
+        msc = MultiStorageClientFeature.import_package()
+        torch_save = msc.torch.save
+    else:
+        torch_save = torch.save
+    torch_save(dataloader_save_dict, data_state_save_path)
 
 
 def save_tokenizer_assets(
