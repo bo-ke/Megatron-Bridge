@@ -931,6 +931,23 @@ def training_log(
         if comet_logger:
             comet_logger.log_metrics({"batch-size": batch_size}, step=iteration)
 
+        if global_state.train_state.consumed_non_pad_tokens > 0:
+            writer.add_scalar(
+                "consumed-loss-tokens", global_state.train_state.consumed_non_pad_tokens, iteration
+            )
+            if wandb_writer:
+                wandb_writer.log(
+                    {"consumed-loss-tokens": global_state.train_state.consumed_non_pad_tokens}, iteration
+                )
+        if global_state.train_state.consumed_total_tokens > 0:
+            writer.add_scalar(
+                "consumed-total-tokens", global_state.train_state.consumed_total_tokens, iteration
+            )
+            if wandb_writer:
+                wandb_writer.log(
+                    {"consumed-total-tokens": global_state.train_state.consumed_total_tokens}, iteration
+                )
+
         # loss dict
         for key in loss_dict:
             if writer:
@@ -1179,6 +1196,14 @@ def training_log(
         log_string = f" [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
         log_string += " iteration {:8d}/{:8d} |".format(iteration, train_config.train_iters)
         log_string += " consumed samples: {:12d} |".format(global_state.train_state.consumed_train_samples)
+        if global_state.train_state.consumed_non_pad_tokens > 0:
+            log_string += " consumed loss tokens: {:12d} |".format(
+                global_state.train_state.consumed_non_pad_tokens
+            )
+        if global_state.train_state.consumed_total_tokens > 0:
+            log_string += " consumed total tokens: {:12d} |".format(
+                global_state.train_state.consumed_total_tokens
+            )
         if global_state.train_state.skipped_train_samples > 0:
             log_string += " skipped samples: {:12d} |".format(global_state.train_state.skipped_train_samples)
         log_string += " elapsed time per iteration (ms): {:.1f} |".format(elapsed_time_per_iteration * 1000.0)
