@@ -1352,7 +1352,9 @@ def maybe_save_dataloader_state(
     if not is_first_rank:
         return
 
-    dp_rank = pg_collection.dp.rank()
+    dp_rank = mpu.get_data_parallel_rank()
+    global_rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+
     print_rank_0(f"saving dataloader checkpoint at iteration {iteration} to {dataloader_save_path}")
     train_dataloader_state_dict = train_iterator.iterable.save_state()
     # Get the base directory for the current iteration
@@ -1373,6 +1375,9 @@ def maybe_save_dataloader_state(
     else:
         torch_save = torch.save
     torch_save(dataloader_save_dict, data_state_save_path)
+
+    # Log the actual save operation for each rank (not just rank 0)
+    logger.info(f"[RANK{global_rank}] [DP_RANK{dp_rank}] Saved dataloader state to: {data_state_save_path}")
 
 
 def save_tokenizer_assets(

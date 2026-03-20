@@ -90,7 +90,9 @@ class TrainState(Stateful):
         self.consumed_train_samples = state_dict["consumed_train_samples"].item()
         self.skipped_train_samples = state_dict["skipped_train_samples"].item()
         self.consumed_valid_samples = state_dict["consumed_valid_samples"].item()
-        self.consumed_non_pad_tokens = state_dict["consumed_non_pad_tokens"].item()
+        self.consumed_non_pad_tokens = state_dict.get(
+            "consumed_non_pad_tokens", torch.tensor(0, dtype=torch.int64)
+        ).item()
         self.consumed_total_tokens = state_dict.get(
             "consumed_total_tokens", torch.tensor(0, dtype=torch.int64)
         ).item()
