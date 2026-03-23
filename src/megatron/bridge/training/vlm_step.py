@@ -298,7 +298,8 @@ def get_batch(
         if state.tensorboard_logger:
             state.tensorboard_logger.add_scalar('data_timer/wait_data', data_wait_timecost, state.train_state.step)
             state.tensorboard_logger.add_scalar('data_timer/process_data', data_process_timecost, state.train_state.step)
-        logger.info(f'data_wait_timecost:{data_wait_timecost:.3f} s, data_process_timecost:{data_process_timecost:.3f} s')
+        if getattr(cfg.dataset, 'verbose_mode', False):
+            logger.info(f'data_wait_timecost:{data_wait_timecost:.3f} s, data_process_timecost:{data_process_timecost:.3f} s')
     enable_packing = getattr(cfg.dataset, "pack_sequences_in_batch", False)
 
     if not enable_packing:
