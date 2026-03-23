@@ -825,10 +825,17 @@ def training_log(
 
     if loggers_exist and iteration % logger_config.tensorboard_log_interval == 0:
         if logger_config.log_throughput_to_tensorboard:
+            # Use model.seq_length if it has been overridden (e.g. by packed_max_seq_len hack),
+            # otherwise fall back to dataset.seq_length.
+            _throughput_seq_length = (
+                config.model.seq_length
+                if config.model.seq_length > config.dataset.seq_length
+                else config.dataset.seq_length
+            )
             throughput_report = report_throughput(
                 iteration=iteration,
                 train_config=train_config,
-                seq_length=config.dataset.seq_length,
+                seq_length=_throughput_seq_length,
                 history_wct=history_wct,
                 window_size=logger_config.throughput_window_size,
             )
@@ -852,10 +859,15 @@ def training_log(
             if comet_logger:
                 comet_logger.log_metrics(memory_report, step=iteration)
         if logger_config.log_runtime_to_tensorboard:
+            _runtime_seq_length = (
+                config.model.seq_length
+                if config.model.seq_length > config.dataset.seq_length
+                else config.dataset.seq_length
+            )
             runtime_report = report_runtime(
                 train_state=train_state,
                 start_time=global_state.start_time,
-                seq_length=config.dataset.seq_length,
+                seq_length=_runtime_seq_length,
                 train_iters=train_config.train_iters,
                 time_unit=logger_config.runtime_time_unit,
             )
