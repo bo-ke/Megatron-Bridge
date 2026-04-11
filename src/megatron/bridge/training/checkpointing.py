@@ -1352,7 +1352,7 @@ def maybe_save_dataloader_state(
     if not is_first_rank:
         return
 
-    dp_rank = mpu.get_data_parallel_rank()
+    dp_rank = pg_collection.dp.rank()
     global_rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
 
     print_rank_0(f"saving dataloader checkpoint at iteration {iteration} to {dataloader_save_path}")
@@ -1365,7 +1365,7 @@ def maybe_save_dataloader_state(
     # Each rank ensures directory exists (needed for multi-node with local filesystems)
     ensure_directory_exists(data_state_save_path)
 
-    torch.distributed.barrier(group=mpu.get_data_parallel_group(with_context_parallel=True))
+    torch.distributed.barrier(group=pg_collection.dp_cp if hasattr(pg_collection, 'dp_cp') else pg_collection.dp)
 
     dataloader_save_dict = {}
     dataloader_save_dict["dataloader_state_dict"] = train_dataloader_state_dict

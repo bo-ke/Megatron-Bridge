@@ -449,7 +449,7 @@ def train(
             log_max_attention_logit,
             num_non_pad_tokens_in_batch,
             num_total_tokens_in_batch,
-        ) = train_step(
+        ) = wrapped_train_step(
             wrapped_forward_step_func,
             train_data_iterator,
             model,

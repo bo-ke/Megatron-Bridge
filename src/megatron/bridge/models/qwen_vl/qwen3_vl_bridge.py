@@ -16,10 +16,12 @@ import logging
 from typing import Dict, Mapping, Union
 
 import torch
+import torch.nn as nn
+from megatron.core import parallel_state
 from transformers import Qwen3VLForConditionalGeneration, Qwen3VLMoeForConditionalGeneration
 
 from megatron.bridge.models.conversion.mapping_registry import MegatronMappingRegistry
-from megatron.bridge.models.conversion.model_bridge import MegatronModelBridge
+from megatron.bridge.models.conversion.model_bridge import MegatronModelBridge, WeightConversionTask
 from megatron.bridge.models.conversion.param_mapping import (
     AutoMapping,
     ConcatenatedQKVMapping,
@@ -33,6 +35,7 @@ from megatron.bridge.models.conversion.transformers_compat import rope_theta_fro
 from megatron.bridge.models.hf_pretrained.vlm import PreTrainedVLM
 from megatron.bridge.models.qwen_vl.modelling_qwen3_vl.model import Qwen3VLModel
 from megatron.bridge.models.qwen_vl.qwen3_vl_provider import Qwen3VLModelProvider, Qwen3VLMoEModelProvider
+from megatron.bridge.utils.common_utils import extract_expert_number_from_param
 
 
 @MegatronModelBridge.register_bridge(
