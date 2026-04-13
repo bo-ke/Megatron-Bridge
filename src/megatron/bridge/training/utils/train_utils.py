@@ -676,6 +676,7 @@ def training_log(
     model: list[MegatronModule],
     pg_collection: Optional[Any] = None,
     log_max_attention_logit: Optional[float] = None,
+    num_total_tokens_in_batch: int = 0,
     loaded_iteration: int = 0,
     seq_length: Optional[int] = None,
 ) -> bool:
@@ -965,6 +966,12 @@ def training_log(
             if writer:
                 writer.add_scalar(key, loss_dict[key], iteration)
                 writer.add_scalar(key + " vs samples", loss_dict[key], global_state.train_state.consumed_train_samples)
+                if global_state.train_state.consumed_total_tokens > 0:
+                    writer.add_scalar(
+                        key + " vs consumed-total-tokens",
+                        loss_dict[key],
+                        global_state.train_state.consumed_total_tokens,
+                    )
             if wandb_writer:
                 wandb_writer.log({key: loss_dict[key]}, iteration)
         if mlflow_logger:
@@ -1264,8 +1271,8 @@ def training_log(
             log_string += f" max attention logit: {log_max_attention_logit:.3f} |"
         log_string += " number of skipped iterations: {:3d} |".format(total_loss_dict[skipped_iters_key])
         log_string += " number of nan iterations: {:3d} |".format(total_loss_dict[nan_iters_key])
-        tokens_per_sec_per_gpu = batch_size * config.model.seq_length / (elapsed_time_per_iteration * get_world_size_safe())
-        log_string += f" tokens/sec per GPU: {tokens_per_sec_per_gpu:.1f} |"
+        tokens_per_sec_per_card = num_total_tokens_in_batch / elapsed_time_per_iteration / get_world_size_safe()
+        log_string += f" tokens/sec per GPU: {tokens_per_sec_per_card:.1f} |"
         total_loss_dict[advanced_iters_key] = 0
         total_loss_dict[skipped_iters_key] = 0
         total_loss_dict[nan_iters_key] = 0
