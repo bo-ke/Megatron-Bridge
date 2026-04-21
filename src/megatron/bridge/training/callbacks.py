@@ -60,6 +60,8 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 VALID_EVENTS: frozenset[str] = frozenset(
     {
+        "on_model_built",
+        "on_optimizer_built",
         "on_data_init_start",
         "on_train_start",
         "on_train_step_start",
@@ -141,6 +143,14 @@ class Callback:
         pretrain(config, forward_step_func, callbacks=[MyCallback()])
         ```
     """
+
+    def on_model_built(self, context: CallbackContext) -> None:
+        """Called after the distributed model is built, before the optimizer is built."""
+        pass
+
+    def on_optimizer_built(self, context: CallbackContext) -> None:
+        """Called after the optimizer and LR scheduler are built, before checkpoint load."""
+        pass
 
     def on_data_init_start(self, context: CallbackContext) -> None:
         """Called after model/optimizer/checkpoint are ready, before dataset files are opened.
