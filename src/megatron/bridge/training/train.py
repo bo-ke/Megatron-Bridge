@@ -631,8 +631,8 @@ def train(
                 global_state,
                 history_wct,
                 model,
-                log_max_attention_logit,
-                num_total_tokens_in_batch,
+                log_max_attention_logit=log_max_attention_logit,
+                num_total_tokens_in_batch=num_total_tokens_in_batch,
                 loaded_iteration=start_iteration,
                 seq_length=seqlen_sum // batch_size if seqlen_sum else None,
             )
