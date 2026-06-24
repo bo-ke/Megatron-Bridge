@@ -1300,11 +1300,18 @@ def cleanup_old_non_persistent_checkpoint(
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     if torch.distributed.is_initialized() and local_rank != 0:
         return
-    save_dir = Path(save_dir)
 
     iter_prefix = "iter_"
-    iter_ckpts = save_dir.rglob(f"{iter_prefix}*")
-    sorted_iter_ckpts = sorted(iter_ckpts, key=lambda ckpt_name: int(ckpt_name.name[len(iter_prefix) :]))
+
+    if MultiStorageClientFeature.is_enabled():
+        msc = MultiStorageClientFeature.import_package()
+        list_dir = lambda: msc.Path(save_dir).rglob(f"{iter_prefix}*")
+        remove = lambda ckpt: msc.delete(str(ckpt), recursive=True)
+    else:
+        list_dir = lambda: Path(save_dir).rglob(f"{iter_prefix}*")
+        remove = lambda ckpt: shutil.rmtree(ckpt)
+
+    sorted_iter_ckpts = sorted(list_dir(), key=lambda p: int(p.name[len(iter_prefix) :]))
     if not sorted_iter_ckpts:
         return
     rm_iter_ckpts = sorted_iter_ckpts[:-leave_ckpt_num]
@@ -1313,7 +1320,7 @@ def cleanup_old_non_persistent_checkpoint(
 
     def remove_iter_ckpts(_iter_ckpts):
         for ckpt in _iter_ckpts:
-            shutil.rmtree(ckpt)
+            remove(ckpt)
 
     if do_async:
         threading.Thread(target=remove_iter_ckpts, args=(rm_iter_ckpts,)).start()
