@@ -51,6 +51,32 @@ except ImportError:
     HAS_PAGED_STASHING = False
 
 
+def _merge_metric_chunks(
+    metric_chunks: list[dict[str, torch.Tensor]],
+    group: torch.distributed.ProcessGroup | None,
+) -> dict[str, torch.Tensor]:
+    """Reduce metric chunks by key union."""
+    reduced: dict[str, torch.Tensor] = {}
+    all_keys = set().union(*(chunk.keys() for chunk in metric_chunks))
+    for key in all_keys:
+        vals = [chunk[key].view(-1) for chunk in metric_chunks if key in chunk]
+        if not vals:
+            continue
+        if vals[0].numel() >= 2:
+            stacked = torch.vstack([val[:2] for val in vals]).sum(dim=0)
+            if group is not None:
+                torch.distributed.all_reduce(stacked, group=group)
+            reduced[key] = stacked
+        elif vals[0].numel() == 1:
+            scalar = torch.cat(vals).sum()
+            if group is not None:
+                torch.distributed.all_reduce(scalar, group=group)
+            reduced[key] = scalar.view(1)
+        else:
+            raise ValueError(f"Invalid value shape: {vals[0].shape} for key {key}")
+    return reduced
+
+
 def evaluate(
     state: GlobalState,
     forward_step_func: ForwardStepCallable,
@@ -274,25 +300,19 @@ def evaluate(
                 else:
                     dp_cp_group = pg_collection.dp_cp
 
-                for key in loss_dicts[0].keys():
-                    if key not in total_loss_dict:
-                        total_loss_dict[key] = torch.tensor([0.0, 0.0], dtype=torch.float).cuda()
-                    val = [x[key].view(-1) for x in loss_dicts]
-
-                    if val[0].numel() >= 2:
-                        # Reporting tensors are [loss, num_tokens] or, since the
-                        # consumed-total-tokens change, [loss, num_tokens, total_tokens].
-                        # Eval only averages loss over num_tokens, so keep the first two
-                        # entries and ignore any trailing fields.
-                        val = torch.vstack(val).sum(dim=0)[:2]
-                        torch.distributed.all_reduce(val, group=dp_cp_group)
-                        total_loss_dict[key] += val
-                    elif val[0].numel() == 1:
-                        val = torch.cat(val).sum()
-                        total_loss_dict[key][0] += val
-                        total_loss_dict[key][1] += len(loss_dicts)
+                step_metrics = _merge_metric_chunks(loss_dicts, dp_cp_group)
+                for key, value in step_metrics.items():
+                    if value.numel() >= 2:
+                        if key not in total_loss_dict:
+                            total_loss_dict[key] = torch.zeros(2, dtype=torch.float, device=value.device)
+                        total_loss_dict[key] += value[:2]
+                    elif value.numel() == 1:
+                        if key not in total_loss_dict:
+                            total_loss_dict[key] = torch.zeros(2, dtype=torch.float, device=value.device)
+                        total_loss_dict[key][0] += value.item()
+                        total_loss_dict[key][1] += 1
                     else:
-                        raise ValueError(f"Invalid value shape: {val[0].shape} for key {key}")
+                        raise ValueError(f"Invalid value shape: {value.shape} for key {key}")
 
             state.train_state.consumed_valid_samples += eval_batch_size
 
