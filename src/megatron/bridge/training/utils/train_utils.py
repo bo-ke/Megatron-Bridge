@@ -675,6 +675,7 @@ def training_log(
     model: list[MegatronModule],
     pg_collection: Optional[Any] = None,
     log_max_attention_logit: Optional[float] = None,
+    num_total_tokens_in_batch: int = 0,
     loaded_iteration: int = 0,
     seq_length: Optional[int] = None,
 ) -> bool:
@@ -824,10 +825,17 @@ def training_log(
 
     if loggers_exist and iteration % logger_config.tensorboard_log_interval == 0:
         if logger_config.log_throughput_to_tensorboard:
+            # Use model.seq_length if it has been overridden (e.g. by packed_max_seq_len hack),
+            # otherwise fall back to dataset.seq_length.
+            _throughput_seq_length = (
+                config.model.seq_length
+                if config.model.seq_length > config.dataset.seq_length
+                else config.dataset.seq_length
+            )
             throughput_report = report_throughput(
                 iteration=iteration,
                 train_config=train_config,
-                seq_length=config.dataset.seq_length,
+                seq_length=_throughput_seq_length,
                 history_wct=history_wct,
                 window_size=logger_config.throughput_window_size,
             )
@@ -851,10 +859,15 @@ def training_log(
             if comet_logger:
                 comet_logger.log_metrics(memory_report, step=iteration)
         if logger_config.log_runtime_to_tensorboard:
+            _runtime_seq_length = (
+                config.model.seq_length
+                if config.model.seq_length > config.dataset.seq_length
+                else config.dataset.seq_length
+            )
             runtime_report = report_runtime(
                 train_state=train_state,
                 start_time=global_state.start_time,
-                seq_length=config.dataset.seq_length,
+                seq_length=_runtime_seq_length,
                 train_iters=train_config.train_iters,
                 time_unit=logger_config.runtime_time_unit,
             )
@@ -930,11 +943,34 @@ def training_log(
         if comet_logger:
             comet_logger.log_metrics({"batch-size": batch_size}, step=iteration)
 
+        if global_state.train_state.consumed_non_pad_tokens > 0:
+            writer.add_scalar(
+                "consumed-loss-tokens", global_state.train_state.consumed_non_pad_tokens, iteration
+            )
+            if wandb_writer:
+                wandb_writer.log(
+                    {"consumed-loss-tokens": global_state.train_state.consumed_non_pad_tokens}, iteration
+                )
+        if global_state.train_state.consumed_total_tokens > 0:
+            writer.add_scalar(
+                "consumed-total-tokens", global_state.train_state.consumed_total_tokens, iteration
+            )
+            if wandb_writer:
+                wandb_writer.log(
+                    {"consumed-total-tokens": global_state.train_state.consumed_total_tokens}, iteration
+                )
+
         # loss dict
         for key in loss_dict:
             if writer:
                 writer.add_scalar(key, loss_dict[key], iteration)
                 writer.add_scalar(key + " vs samples", loss_dict[key], global_state.train_state.consumed_train_samples)
+                if global_state.train_state.consumed_total_tokens > 0:
+                    writer.add_scalar(
+                        key + " vs consumed-total-tokens",
+                        loss_dict[key],
+                        global_state.train_state.consumed_total_tokens,
+                    )
             if wandb_writer:
                 wandb_writer.log({key: loss_dict[key]}, iteration)
         if mlflow_logger:
@@ -1087,6 +1123,7 @@ def training_log(
         # Using the cumulative delta is also the single source of truth — it cannot
         # disagree with ``floating_point_operations_so_far`` and needs no extra reduce.
         num_flops = None
+        tokens_per_sec_per_gpu = None
         if hasattr(config.model, "kv_channels") and hasattr(config.model, "num_attention_heads"):
             # Coerce to float — floating_point_operations_so_far is a float in
             # production, but getattr on a MagicMock test double (and an unset anchor)
@@ -1103,12 +1140,18 @@ def training_log(
             print_rank_0(
                 f"Step Time : {elapsed_time_per_iteration:.2f}s GPU utilization: {per_gpu_tf:.1f}MODEL_TFLOP/s/GPU"
             )
+        seq_length = getattr(config.model, "seq_length", None)
+        if seq_length is not None:
+            tokens_per_sec_per_gpu = batch_size * seq_length / elapsed_time_per_iteration / get_world_size_safe()
 
         # throughput
         if num_flops is not None and logger_config.log_throughput_to_tensorboard:
             if writer:
                 writer.add_scalar("throughput/tflops/device", per_gpu_tf, iteration)
                 writer.add_scalar("throughput/tflops", per_gpu_tf * get_world_size_safe(), iteration)
+        if tokens_per_sec_per_gpu is not None and logger_config.log_throughput_to_tensorboard:
+            if writer:
+                writer.add_scalar("throughput/tokens_per_sec_per_gpu", tokens_per_sec_per_gpu, iteration)
             if wandb_writer:
                 wandb_writer.log({"throughput/tflops/device": per_gpu_tf}, iteration)
                 wandb_writer.log({"throughput/tflops": per_gpu_tf * get_world_size_safe()}, iteration)
@@ -1142,12 +1185,22 @@ def training_log(
         log_string = f" [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
         log_string += " iteration {:8d}/{:8d} |".format(iteration, train_config.train_iters)
         log_string += " consumed samples: {:12d} |".format(global_state.train_state.consumed_train_samples)
+        if global_state.train_state.consumed_non_pad_tokens > 0:
+            log_string += " consumed loss tokens: {:12d} |".format(
+                global_state.train_state.consumed_non_pad_tokens
+            )
+        if global_state.train_state.consumed_total_tokens > 0:
+            log_string += " consumed total tokens: {:12d} |".format(
+                global_state.train_state.consumed_total_tokens
+            )
         if global_state.train_state.skipped_train_samples > 0:
             log_string += " skipped samples: {:12d} |".format(global_state.train_state.skipped_train_samples)
         log_string += " elapsed time per iteration (ms): {:.1f} |".format(elapsed_time_per_iteration * 1000.0)
 
         if num_flops is not None and logger_config.log_throughput:
             log_string += f" throughput per GPU (TFLOP/s/GPU): {per_gpu_tf:.1f} |"
+        if tokens_per_sec_per_gpu is not None:
+            log_string += f" tokens/sec per GPU: {tokens_per_sec_per_gpu:.1f} |"
 
         if energy_monitor is not None:
             energy = (energy_monitor.lap() / total_iterations) / get_world_size_safe()
@@ -1188,6 +1241,8 @@ def training_log(
             log_string += f" max attention logit: {log_max_attention_logit:.3f} |"
         log_string += " number of skipped iterations: {:3d} |".format(total_loss_dict[skipped_iters_key])
         log_string += " number of nan iterations: {:3d} |".format(total_loss_dict[nan_iters_key])
+        tokens_per_sec_per_card = num_total_tokens_in_batch / elapsed_time_per_iteration / get_world_size_safe()
+        log_string += f" tokens/sec per GPU: {tokens_per_sec_per_card:.1f} |"
         total_loss_dict[advanced_iters_key] = 0
         total_loss_dict[skipped_iters_key] = 0
         total_loss_dict[nan_iters_key] = 0

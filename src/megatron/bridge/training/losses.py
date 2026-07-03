@@ -100,6 +100,7 @@ def masked_next_token_loss(
         )
 
     num_tokens = loss_mask.sum().clone().detach().to(torch.int)
-    reporting_loss = torch.cat([loss.clone().detach().view(1), num_tokens.view(1)])
+    total_tokens = torch.tensor(loss_mask.numel(), dtype=torch.int, device=loss_mask.device)
+    reporting_loss = torch.cat([loss.clone().detach().view(1), num_tokens.view(1), total_tokens.view(1)])
 
     return (loss, num_tokens, {"lm loss": reporting_loss})

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import os
 import re
 import types
@@ -34,6 +35,8 @@ from megatron.bridge.utils.slurm_utils import (
     resolve_slurm_master_port,
 )
 
+
+logger = logging.getLogger(__name__)
 
 try:
     from megatron.core.distributed import TorchFullyShardedDataParallel as torch_FSDP
@@ -102,7 +105,7 @@ def print_rank_0(message: str) -> None:
     """
     rank = get_rank_safe()
     if rank == 0:
-        print(message, flush=True)
+        logger.info(message)
 
 
 def warn_rank_0(message):
@@ -129,9 +132,9 @@ def print_rank_last(message: str) -> None:
     """
     if torch.distributed.is_initialized():
         if is_last_rank():
-            print(message, flush=True)
+            logger.info(message)
     else:
-        print(message, flush=True)
+        logger.info(message)
 
 
 def maybe_initialize_distributed(timeout_minutes: int = 60) -> None:
