@@ -49,6 +49,8 @@ class TrainState(Stateful):
     consumed_train_samples: int = 0
     skipped_train_samples: int = 0
     consumed_valid_samples: int = 0
+    consumed_non_pad_tokens: int = 0
+    consumed_total_tokens: int = 0
     floating_point_operations_so_far: int = 0
     do_train: bool = False
     do_valid: bool = False
@@ -68,6 +70,8 @@ class TrainState(Stateful):
             "consumed_train_samples": torch.tensor(self.consumed_train_samples, dtype=torch.int64),
             "skipped_train_samples": torch.tensor(self.skipped_train_samples, dtype=torch.int64),
             "consumed_valid_samples": torch.tensor(self.consumed_valid_samples, dtype=torch.int64),
+            "consumed_non_pad_tokens": torch.tensor(self.consumed_non_pad_tokens, dtype=torch.int64),
+            "consumed_total_tokens": torch.tensor(self.consumed_total_tokens, dtype=torch.int64),
             "floating_point_operations_so_far": torch.tensor(
                 self.floating_point_operations_so_far, dtype=torch.float64
             ),
@@ -86,6 +90,12 @@ class TrainState(Stateful):
         self.consumed_train_samples = state_dict["consumed_train_samples"].item()
         self.skipped_train_samples = state_dict["skipped_train_samples"].item()
         self.consumed_valid_samples = state_dict["consumed_valid_samples"].item()
+        self.consumed_non_pad_tokens = state_dict.get(
+            "consumed_non_pad_tokens", torch.tensor(0, dtype=torch.int64)
+        ).item()
+        self.consumed_total_tokens = state_dict.get(
+            "consumed_total_tokens", torch.tensor(0, dtype=torch.int64)
+        ).item()
         self.floating_point_operations_so_far = state_dict["floating_point_operations_so_far"].item()
         self.do_train = state_dict["do_train"].item()
         self.do_valid = state_dict["do_valid"].item()
