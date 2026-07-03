@@ -13,12 +13,16 @@
 # limitations under the License.
 
 import abc
+import logging
 import os
 import warnings
 from pathlib import Path
 from typing import Any, Callable, Generic, Mapping, Self, TypedDict, TypeVar, Union
 
 from megatron.bridge.models.common.unimodal import _ddp_wrap, _print_num_params
+
+
+logger = logging.getLogger(__name__)
 
 
 try:
@@ -277,6 +281,36 @@ class ModelProviderMixin(abc.ABC, Generic[ModelT]):
         else:
             final_pre_wrap_hook = pre_wrap_hook or self.pre_wrap_hook
         final_post_wrap_hook = post_wrap_hook or self.post_wrap_hook
+
+        # Log hook information at DEBUG level
+        def _get_hook_info(hook):
+            """Extract readable info from a hook callable."""
+            if hook is None:
+                return "None"
+            if isinstance(hook, list):
+                return "[" + ", ".join([_get_hook_info(h) for h in hook]) + "]"
+            if hasattr(hook, "func"):  # partial object
+                func_name = getattr(hook.func, "__name__", str(hook.func))
+                return f"partial({func_name})"
+            if hasattr(hook, "__name__"):
+                return hook.__name__
+            return str(hook)
+
+        registered_pre_hooks = getattr(self, "_pre_wrap_hooks", [])
+        registered_post_hooks = getattr(self, "_post_wrap_hooks", [])
+        logger.debug(
+            f"[ModelProvider] Registered pre_wrap_hooks ({len(registered_pre_hooks)}): "
+            f"{[_get_hook_info(h) for h in registered_pre_hooks]}"
+        )
+        logger.debug(
+            f"[ModelProvider] Registered post_wrap_hooks ({len(registered_post_hooks)}): "
+            f"{[_get_hook_info(h) for h in registered_post_hooks]}"
+        )
+        logger.debug(
+            f"[ModelProvider] Final pre_wrap_hook: "
+            f"{_get_hook_info(pre_wrap_hook if pre_wrap_hook is not None else registered_pre_hooks)}"
+        )
+        logger.debug(f"[ModelProvider] Final post_wrap_hook: {_get_hook_info(final_post_wrap_hook)}")
 
         model = get_model(
             self,
