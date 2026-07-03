@@ -2027,7 +2027,6 @@ class MegatronModelBridge(
         embeddings_are_tied = self._share_embeddings_and_output_weights(model_config)
         pp_rank = _get_pp_rank(megatron_model)
         sorted_global_param_names_all_pp_ranks = self._megatron_global_param_names_all_pp_ranks(megatron_model)
-
         # Filter out output_layer related parameters if embeddings are tied
         if embeddings_are_tied:
             sorted_global_param_names_all_pp_ranks = [
