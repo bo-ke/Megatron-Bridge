@@ -498,6 +498,8 @@ def train(
             grad_norm,
             num_zeros_in_grad,
             log_max_attention_logit,
+            num_non_pad_tokens_in_batch,
+            num_total_tokens_in_batch,
         ) = wrapped_train_step(
             wrapped_forward_step_func,
             train_data_iterator,
@@ -588,6 +590,8 @@ def train(
 
         batch_size = dp_size * train_config.micro_batch_size * get_num_microbatches()
         global_state.train_state.consumed_train_samples += batch_size
+        global_state.train_state.consumed_non_pad_tokens += num_non_pad_tokens_in_batch
+        global_state.train_state.consumed_total_tokens += num_total_tokens_in_batch
         num_skipped_samples_in_batch = get_current_global_batch_size() - get_current_running_global_batch_size()
         if train_config.decrease_batch_size_if_needed:
             assert num_skipped_samples_in_batch >= 0
@@ -668,6 +672,7 @@ def train(
                 model,
                 pg_collection=pg_collection,
                 log_max_attention_logit=log_max_attention_logit,
+                num_total_tokens_in_batch=num_total_tokens_in_batch,
                 loaded_iteration=start_iteration,
                 # training_log recomputes seqlen/FLOPS from the (log-step) accumulators
                 # itself; pass None so it uses that path (the per-step seqlen_sum is no
@@ -947,7 +952,7 @@ def train_step(
         )
     should_checkpoint, should_exit, exit_code = rerun_state_machine.should_checkpoint_and_exit()
     if should_exit:
-        return {}, True, should_checkpoint, should_exit, exit_code, None, None, None
+        return {}, True, should_checkpoint, should_exit, exit_code, None, None, None, 0, 0
 
     # Empty unused memory.
     if train_config.empty_unused_memory_level >= 1:
@@ -1001,16 +1006,21 @@ def train_step(
     if pp_last_stage:
         # Average loss across microbatches.
         loss_reduced = {}
+        num_non_pad_tokens_in_batch = 0
+        num_total_tokens_in_batch = 0
 
         for key in losses_reduced[0].keys():
             val = [x[key].view(-1) for x in losses_reduced]
-            if val[0].numel() == 2:
+            if val[0].numel() >= 2:
                 # there is one dict per microbatch. in new reporting, we average
                 # over the total number of tokens across the global batch.
                 val = torch.vstack(val).sum(dim=0)
                 dp_cp_group = get_data_distribution_group(pg_collection, cfg.model, with_context_parallel=True)
                 torch.distributed.all_reduce(val, group=dp_cp_group)
                 loss_reduced[key] = val[0] / val[1]
+                num_non_pad_tokens_in_batch = int(val[1].item())
+                if val.numel() >= 3:
+                    num_total_tokens_in_batch = int(val[2].item())
             elif val[0].numel() == 1:
                 # legacy behavior, we average over the number of microbatches
                 val = torch.cat(val).mean()
@@ -1026,6 +1036,8 @@ def train_step(
             grad_norm,
             num_zeros_in_grad,
             log_max_attention_logit,
+            num_non_pad_tokens_in_batch,
+            num_total_tokens_in_batch,
         )
     return (
         {},
@@ -1036,6 +1048,8 @@ def train_step(
         grad_norm,
         num_zeros_in_grad,
         log_max_attention_logit,
+        0,
+        0,
     )
 
 

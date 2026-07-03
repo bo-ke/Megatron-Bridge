@@ -1727,22 +1727,27 @@ def cleanup_old_non_persistent_checkpoint(
         do_async: If True, performs cleanup in a background thread.
         max_iteration: If set, ignores newer iteration directories that may still be incomplete.
     """
-    if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
+    # NOTE: 使用 local_rank 而不是 global rank，确保每台机器都清理本地文件系统上的 checkpoint
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    if torch.distributed.is_initialized() and local_rank != 0:
         return
-    if MultiStorageClientFeature.is_enabled():
-        msc = MultiStorageClientFeature.import_package()
-        save_dir = msc.Path(save_dir)
-    else:
-        msc = None
-        save_dir = Path(save_dir)
 
     iter_prefix = "iter_"
-    iter_ckpts = save_dir.glob(f"{iter_prefix}*")
+
+    if MultiStorageClientFeature.is_enabled():
+        msc = MultiStorageClientFeature.import_package()
+        list_dir = lambda: msc.Path(save_dir).rglob(f"{iter_prefix}*")
+        remove = lambda ckpt: msc.delete(str(ckpt), recursive=True)
+    else:
+        list_dir = lambda: Path(save_dir).rglob(f"{iter_prefix}*")
+        remove = lambda ckpt: shutil.rmtree(ckpt)
+
+    iter_ckpts = list_dir()
     if max_iteration is not None:
         iter_ckpts = (
             ckpt_path for ckpt_path in iter_ckpts if int(ckpt_path.name[len(iter_prefix) :]) <= max_iteration
         )
-    sorted_iter_ckpts = sorted(iter_ckpts, key=lambda ckpt_name: int(ckpt_name.name[len(iter_prefix) :]))
+    sorted_iter_ckpts = sorted(iter_ckpts, key=lambda p: int(p.name[len(iter_prefix) :]))
     if not sorted_iter_ckpts:
         return
     # `leave_ckpt_num == 0` means keep none: slice with `[:-0]` would be `[:0]` (empty),
@@ -1759,11 +1764,7 @@ def cleanup_old_non_persistent_checkpoint(
     def remove_iter_ckpts(_iter_ckpts):
         with _CHECKPOINT_CLEANUP_LOCK:
             for ckpt in _iter_ckpts:
-                if ckpt.exists():
-                    if msc is not None:
-                        msc.delete(str(ckpt), recursive=True)
-                    else:
-                        shutil.rmtree(ckpt)
+                remove(ckpt)
 
     if do_async:
         threading.Thread(target=remove_iter_ckpts, args=(rm_iter_ckpts,)).start()
@@ -1818,6 +1819,8 @@ def maybe_save_dataloader_state(
         return
 
     dp_rank = get_pg_rank(pg_collection.dp)
+    global_rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+
     print_rank_0(f"saving dataloader checkpoint at iteration {iteration} to {dataloader_save_path}")
     train_dataloader_state_dict = train_iterator.iterable.save_state()
     # Get the base directory for the current iteration
@@ -1825,8 +1828,10 @@ def maybe_save_dataloader_state(
     # Construct the specific filename within that iteration directory
     data_state_save_path = os.path.join(iter_dir, f"train_dataloader_dprank{dp_rank:03d}.pt")
 
-    torch.distributed.barrier(group=pg_collection.dp)
+    # Each rank ensures directory exists (needed for multi-node with local filesystems)
+    ensure_directory_exists(data_state_save_path)
 
+<<<<<<< HEAD
     if get_pg_rank(pg_collection.dp) == 0:
         # A retained Energon generation may outlive its model checkpoint. Replace the generation
         # before reusing an iteration so rank files from a previous, larger DP world cannot survive.
@@ -1847,6 +1852,21 @@ def maybe_save_dataloader_state(
         msc.torch.save(dataloader_save_dict, data_state_save_path)
     else:
         torch.save(dataloader_save_dict, data_state_save_path)
+=======
+    torch.distributed.barrier(group=pg_collection.dp_cp if hasattr(pg_collection, 'dp_cp') else pg_collection.dp)
+
+    dataloader_save_dict = {}
+    dataloader_save_dict["dataloader_state_dict"] = train_dataloader_state_dict
+    if  MultiStorageClientFeature.is_enabled():
+        msc = MultiStorageClientFeature.import_package()
+        torch_save = msc.torch.save
+    else:
+        torch_save = torch.save
+    torch_save(dataloader_save_dict, data_state_save_path)
+
+    # Log the actual save operation for each rank (not just rank 0)
+    logger.info(f"[RANK{global_rank}] [DP_RANK{dp_rank}] Saved dataloader state to: {data_state_save_path}")
+>>>>>>> 34bc5245 ([training] feat: throughput/consumed-token logging, custom hooks, energon ckpt fixes)
 
 
 def maybe_load_dataloader_state(
