@@ -61,6 +61,13 @@ class Qwen3VLTransformerConfig(TransformerConfig):
     # Maximum sequence length for vision encoder CUDA graphs.
     max_vision_cuda_graph_seq_length: Optional[int] = None
 
+    # Recompute skip layers: skip the first N layers (e.g., DeepStack layers) from recomputation
+    # When set to 3, layers 0,1,2 will NOT be recomputed, layers 3+ will be recomputed
+    recompute_skip_num_layers: int = 0
+
+    # Vision model attention implementation: "sdpa" (default), "flash_attention_2", or "eager"
+    vision_attn_implementation: str = "sdpa"
+
 
 def _apply_vision_recompute_config(config: Qwen3VLTransformerConfig, megatron_config: TransformerConfig) -> None:
     """Resolve an explicit vision policy without changing the decoder configuration."""
