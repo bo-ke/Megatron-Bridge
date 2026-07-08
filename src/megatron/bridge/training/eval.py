@@ -279,8 +279,12 @@ def evaluate(
                         total_loss_dict[key] = torch.tensor([0.0, 0.0], dtype=torch.float).cuda()
                     val = [x[key].view(-1) for x in loss_dicts]
 
-                    if val[0].numel() == 2:
-                        val = torch.vstack(val).sum(dim=0)
+                    if val[0].numel() >= 2:
+                        # Reporting tensors are [loss, num_tokens] or, since the
+                        # consumed-total-tokens change, [loss, num_tokens, total_tokens].
+                        # Eval only averages loss over num_tokens, so keep the first two
+                        # entries and ignore any trailing fields.
+                        val = torch.vstack(val).sum(dim=0)[:2]
                         torch.distributed.all_reduce(val, group=dp_cp_group)
                         total_loss_dict[key] += val
                     elif val[0].numel() == 1:
