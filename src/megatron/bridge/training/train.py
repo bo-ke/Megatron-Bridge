@@ -887,15 +887,21 @@ def train_step(
         else:
             adjust_tensor_shapes_fn = None
 
+        fb_seq_length = seq_length
+        fb_micro_batch_size = train_config.micro_batch_size
+        if pg_collection.pp.size() > 1 and fb_micro_batch_size > 1:
+            fb_seq_length = seq_length * fb_micro_batch_size
+            fb_micro_batch_size = 1
+
         # Forward pass.
         losses_reduced = forward_backward_func(
             forward_step_func=forward_step_func,
             data_iterator=forward_backward_data_iterator,
             model=model,
             num_microbatches=get_num_microbatches(),
-            seq_length=seq_length,
-            micro_batch_size=train_config.micro_batch_size,
-            decoder_seq_length=seq_length,
+            seq_length=fb_seq_length,
+            micro_batch_size=fb_micro_batch_size,
+            decoder_seq_length=fb_seq_length,
             forward_only=False,
             adjust_tensor_shapes_fn=adjust_tensor_shapes_fn,
             p2p_communicator=p2p_communicator,
