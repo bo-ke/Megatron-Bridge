@@ -1831,7 +1831,8 @@ def maybe_save_dataloader_state(
     # Each rank ensures directory exists (needed for multi-node with local filesystems)
     ensure_directory_exists(data_state_save_path)
 
-<<<<<<< HEAD
+    torch.distributed.barrier(group=pg_collection.dp)
+
     if get_pg_rank(pg_collection.dp) == 0:
         # A retained Energon generation may outlive its model checkpoint. Replace the generation
         # before reusing an iteration so rank files from a previous, larger DP world cannot survive.
@@ -1852,21 +1853,8 @@ def maybe_save_dataloader_state(
         msc.torch.save(dataloader_save_dict, data_state_save_path)
     else:
         torch.save(dataloader_save_dict, data_state_save_path)
-=======
-    torch.distributed.barrier(group=pg_collection.dp_cp if hasattr(pg_collection, 'dp_cp') else pg_collection.dp)
 
-    dataloader_save_dict = {}
-    dataloader_save_dict["dataloader_state_dict"] = train_dataloader_state_dict
-    if  MultiStorageClientFeature.is_enabled():
-        msc = MultiStorageClientFeature.import_package()
-        torch_save = msc.torch.save
-    else:
-        torch_save = torch.save
-    torch_save(dataloader_save_dict, data_state_save_path)
-
-    # Log the actual save operation for each rank (not just rank 0)
     logger.info(f"[RANK{global_rank}] [DP_RANK{dp_rank}] Saved dataloader state to: {data_state_save_path}")
->>>>>>> 34bc5245 ([training] feat: throughput/consumed-token logging, custom hooks, energon ckpt fixes)
 
 
 def maybe_load_dataloader_state(
