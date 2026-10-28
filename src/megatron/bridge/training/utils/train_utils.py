@@ -1173,6 +1173,27 @@ def training_log(
         MTPLossLoggingHelper.track_mtp_metrics(
             mtp_loss_scale, iteration, mtp_metric_writer, wandb_writer, total_loss_dict
         )
+    if (getattr(config.model, "dsa_indexer_loss_coeff", None) or 0) > 0:
+        # Imported lazily: MCore releases without experimental attention variants lack this module.
+        from megatron.core.transformer.experimental_attention_variant.dsa import DSAIndexerLossLoggingHelper
+
+        # Only compress-ratio-4 layers own an indexer, so they are the divisor for the mean.
+        csa_compress_ratios = getattr(config.model, "csa_compress_ratios", None) or []
+        num_indexer_layers = sum(ratio == 4 for ratio in csa_compress_ratios[: config.model.num_layers])
+        indexer_metric_writer = _build_moe_metric_writer(writer, comet_logger, mlflow_logger)
+        DSAIndexerLossLoggingHelper.track_indexer_metrics(
+            loss_scale=1 / _step_num_microbatches(global_state),
+            iteration=iteration,
+            writer=indexer_metric_writer,
+            pg_collection=pg_collection,
+            wandb_writer=wandb_writer,
+            total_loss_dict=total_loss_dict,
+            # Matches the tracker size the CSA layers allocate, so pipeline ranks that own
+            # no indexer still contribute zeros to the reduction.
+            num_layers=config.model.num_layers + (getattr(config.model, "mtp_num_layers", None) or 0),
+            num_indexer_layers=num_indexer_layers or None,
+            preserve_groups=getattr(config.model, "cuda_graph_impl", "none") != "none",
+        )
 
     if iteration % logger_config.log_interval == 0:
         elapsed_time = timers("interval-time").elapsed(barrier=True)
